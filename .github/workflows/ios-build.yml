@@ -1,0 +1,204 @@
+name: iOS IPA Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: "Derleme tipi (unsigned: sertifikasız / Sideloadly-AltStore, signed: Apple Developer imzalı)"
+        required: true
+        default: "unsigned"
+        type: choice
+        options:
+          - unsigned
+          - signed
+      export_method:
+        description: "İmzalı derleme dağıtım yöntemi (sadece signed modunda geçerlidir)"
+        required: false
+        default: "ad-hoc"
+        type: choice
+        options:
+          - ad-hoc
+          - app-store-connect
+          - development
+          - enterprise
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "www/**"
+      - "ios/**"
+      - "capacitor.config.json"
+      - "package.json"
+      - ".github/workflows/ios-build.yml"
+
+jobs:
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-latest
+    env:
+      BUNDLE_ID: com.personeltakip.app
+      SCHEME: App
+      PROJECT_PATH: ios/App/App.xcodeproj
+      ARCHIVE_PATH: build/App.xcarchive
+      EXPORT_PATH: build/export
+
+    steps:
+      - name: Depoyu indir
+        uses: actions/checkout@v4
+
+      - name: Node.js kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Bağımlılıkları kur ve Capacitor iOS senkronize et
+        run: |
+          npm ci || npm install
+          npx cap sync ios
+
+      - name: Xcode sürümünü göster
+        run: |
+          xcodebuild -version
+          xcodebuild -list -project "$PROJECT_PATH"
+
+      - name: Sertifikasız (Unsigned) IPA derle
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_mode == 'unsigned' }}
+        run: |
+          mkdir -p build/Payload
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -archivePath "$ARCHIVE_PATH" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+          cp -R "$ARCHIVE_PATH/Products/Applications/App.app" build/Payload/
+          cd build
+          zip -qry PersonelTakip-unsigned.ipa Payload
+          ls -lh PersonelTakip-unsigned.ipa
+
+      - name: Sertifikasız IPA çıktısını yükle
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_mode == 'unsigned' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: PersonelTakip-iOS-Unsigned-IPA
+          path: build/PersonelTakip-unsigned.ipa
+          retention-days: 30
+
+      - name: İmzalı (Signed) derleme için sertifika ve profili kur
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_mode == 'signed' }}
+        env:
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APPLE_CERT_P12_BASE64" ] || [ -z "$APPLE_CERT_PASSWORD" ] || [ -z "$APPLE_PROVISIONING_PROFILE_BASE64" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            echo "::error::Signed mod için APPLE_CERT_P12_BASE64, APPLE_CERT_PASSWORD, APPLE_PROVISIONING_PROFILE_BASE64 ve APPLE_TEAM_ID gizli anahtarları (Secrets) tanımlanmalıdır."
+            exit 1
+          fi
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          CERT_PATH="$RUNNER_TEMP/build_certificate.p12"
+          PP_PATH="$RUNNER_TEMP/build_profile.mobileprovision"
+
+          echo -n "$APPLE_CERT_P12_BASE64" | base64 --decode -o "$CERT_PATH"
+          echo -n "$APPLE_PROVISIONING_PROFILE_BASE64" | base64 --decode -o "$PP_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" -P "$APPLE_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          PROFILE_PLIST="$RUNNER_TEMP/profile.plist"
+          security cms -D -i "$PP_PATH" > "$PROFILE_PLIST"
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$PROFILE_PLIST")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$PROFILE_PLIST")
+          cp "$PP_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+          echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: İmzalı (Signed) IPA derle ve dışa aktar
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_mode == 'signed' }}
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          EXPORT_METHOD: ${{ inputs.export_method }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$EXPORT_PATH"
+
+          SIGN_IDENTITY="Apple Distribution"
+          if [ "$EXPORT_METHOD" = "development" ]; then
+            SIGN_IDENTITY="Apple Development"
+          fi
+
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -archivePath "$ARCHIVE_PATH" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
+            archive
+
+          cat <<EOF > build/ExportOptions.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${EXPORT_METHOD}</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -exportPath "$EXPORT_PATH"
+
+          mv "$EXPORT_PATH"/*.ipa build/PersonelTakip-signed.ipa
+          ls -lh build/PersonelTakip-signed.ipa
+
+      - name: İmzalı IPA çıktısını yükle
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_mode == 'signed' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: PersonelTakip-iOS-Signed-IPA
+          path: build/PersonelTakip-signed.ipa
+          retention-days: 30
+
+      - name: Geçici keychain ve sertifikaları temizle
+        if: ${{ always() && env.KEYCHAIN_PATH != '' }}
+        run: |
+          security delete-keychain "$KEYCHAIN_PATH" || true
+          rm -f "$RUNNER_TEMP/build_certificate.p12" "$RUNNER_TEMP/build_profile.mobileprovision" "$RUNNER_TEMP/profile.plist"
