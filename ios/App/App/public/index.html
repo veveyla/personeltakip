@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Personel Takip">
+    <title>Personel Takip</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="apple-touch-icon" href="logo.png">
+    <script src="html5-qrcode.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header style="position: relative;">
+            <div class="logo-container" id="admin-trigger">
+                <img src="logo.png" alt="Logo" class="main-logo">
+                <h1>Personel Takip</h1>
+            </div>
+            <button id="settings-trigger" title="Ayarlar" style="position: absolute; right: 0; top: 20px; font-size: 1.5rem; background: transparent; border: none; color: white; cursor: pointer;">⚙️</button>
+        </header>
+
+        <main>
+            <div id="connection-status" class="connection-banner online">
+                <span class="status-dot"></span>
+                <span id="connection-status-text">İnternet Bağlı</span>
+            </div>
+
+            <div id="saved-user-card" class="glass-card hidden">
+                <p class="saved-user-label">Kayıtlı Personel</p>
+                <h2 id="saved-user-name" class="saved-user-name">-</h2>
+                <button id="quick-scan-btn" class="primary-btn">
+                    <span class="icon">📷</span> QR Kod Oku
+                </button>
+                <button id="change-user-btn" class="secondary-btn" style="width: 100%; margin-top: 10px;">
+                    Kullanıcı Değiştir
+                </button>
+            </div>
+
+            <div id="name-input-card" class="glass-card">
+                <h3>Personel Girişi</h3>
+                <p>Lütfen adınızı giriniz (cihaza bir kez kaydedilir):</p>
+                <div class="input-group" style="margin-top: 15px;">
+                    <input type="text" id="personnel-name-input" list="staff-datalist" placeholder="Ad Soyad" autocomplete="off" style="text-transform: uppercase;">
+                    <datalist id="staff-datalist"></datalist>
+                </div>
+                <button id="ready-scan-btn" class="primary-btn" style="margin-top: 10px;">
+                    <span class="icon">📷</span> Kaydet ve Kamera ile Oku
+                </button>
+                <button id="cancel-change-user-btn" class="secondary-btn hidden" style="width: 100%; margin-top: 10px;">
+                    Vazgeç
+                </button>
+            </div>
+
+            <div id="scanner-section" class="hidden">
+                <div id="reader-container" class="glass-card">
+                    <div id="reader"></div>
+                    <div class="scanner-overlay" id="scanner-overlay">
+                        <div class="scanner-line"></div>
+                    </div>
+                </div>
+
+                <div id="controls" class="controls" style="margin-top: 20px;">
+                    <button id="scan-btn" class="primary-btn">
+                        <span class="icon">🔍</span> QR Kod Oku
+                    </button>
+                </div>
+                <button id="cancel-scan-btn" class="secondary-btn" style="width: 100%; margin-top: 10px;">İptal Et</button>
+            </div>
+
+            <div id="processing-card" class="glass-card hidden">
+                <div class="spinner"></div>
+                <h3 id="processing-title">Kayıt Gönderiliyor...</h3>
+                <p id="processing-subtitle">Bağlantı yoksa kayıt otomatik olarak telefon hafızasına alınacaktır.</p>
+            </div>
+
+            <div id="result-card" class="glass-card hidden">
+                <div class="status-badge" id="status-badge">Başarılı</div>
+                <h2>İşlem Özeti</h2>
+                <div class="detail-row">
+                    <span class="label">Personel:</span>
+                    <span id="res-name" class="value">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Yer:</span>
+                    <span id="res-location" class="value">-</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Zaman:</span>
+                    <span id="res-time" class="value">-</span>
+                </div>
+                <div id="result-offline-note" class="result-note hidden">
+                    İnternet bağlantısı olmadığı için kayıt telefon hafızasına alındı. İnternet geldiğinde otomatik olarak Google Sheet'e aktarılacaktır.
+                </div>
+                <button id="new-scan-btn" class="primary-btn" style="margin-top: 10px;">
+                    <span class="icon">📷</span> Yeni QR Kod Oku
+                </button>
+                <button id="back-home-btn" class="secondary-btn" style="width: 100%;">
+                    Ana Ekrana Dön
+                </button>
+            </div>
+
+            <div id="pending-queue-card" class="glass-card hidden">
+                <div class="pending-header">
+                    <div>
+                        <h3>Hafızada Bekleyen Kayıtlar (<span id="pending-count">0</span>)</h3>
+                        <p class="pending-subtitle">İnternet bağlantısı gelince Google Sheet'e otomatik aktarılır.</p>
+                    </div>
+                </div>
+                <div id="pending-list" class="pending-list"></div>
+                <button id="sync-now-btn" class="primary-btn sync-btn" style="margin-top: 12px;">
+                    <span class="icon">☁️</span> Şimdi Google Sheet'e Gönder
+                </button>
+            </div>
+        </main>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content glass-card">
+                <span class="close-modal">&times;</span>
+                <h3>Uygulama Ayarları</h3>
+                <div class="input-group" style="margin-top: 20px;">
+                    <label>Kamera Tipi</label>
+                    <select id="setting-camera" style="width: 100%; padding: 12px; border-radius: 12px; background: rgba(0,0,0,0.2); color: white; border: 1px solid var(--glass-border);">
+                        <option value="environment" style="color: black;">Arka Kamera</option>
+                        <option value="user" style="color: black;">Ön Kamera</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label>Bildirimler</label>
+                    <select id="setting-notifications" style="width: 100%; padding: 12px; border-radius: 12px; background: rgba(0,0,0,0.2); color: white; border: 1px solid var(--glass-border);">
+                        <option value="on" style="color: black;">Açık (Toast Mesajları)</option>
+                        <option value="off" style="color: black;">Sadece Hatalar</option>
+                    </select>
+                </div>
+                <button id="save-settings-btn" class="primary-btn">Ayarları Kaydet</button>
+            </div>
+        </div>
+
+        <!-- Admin Login Modal -->
+        <div id="admin-modal" class="modal hidden">
+            <div class="modal-content glass-card">
+                <span class="close-modal">&times;</span>
+                <h3>Yönetici Girişi</h3>
+                <div class="input-group">
+                    <label>Kullanıcı Adı</label>
+                    <input type="text" id="admin-user" placeholder="Kullanıcı Adı">
+                </div>
+                <div class="input-group">
+                    <label>Şifre</label>
+                    <input type="password" id="admin-pass" placeholder="Şifre">
+                </div>
+                <button id="login-btn" class="primary-btn">Giriş Yap</button>
+                <div class="forgot-pass-link">
+                    <a href="#" id="forgot-pass">Şifremi Unuttum</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Panel Modal -->
+        <div id="panel-modal" class="modal hidden">
+            <div class="modal-content glass-card panel-wide">
+                <span class="close-modal">&times;</span>
+                <h3>Yönetici Paneli</h3>
+                <div class="admin-actions">
+                    <button class="primary-btn" id="add-staff-btn">Yetkili Ekle</button>
+                    <button class="primary-btn" id="view-logs-btn">Kayıtları Gör</button>
+                    <button class="secondary-btn" id="change-pass-btn">Şifre Değiştir</button>
+                </div>
+
+                <!-- Add Staff Section -->
+                <div id="add-staff-section" class="hidden admin-section">
+                    <h4>Yeni Yetkili Ekle</h4>
+                    <div class="input-group">
+                        <input type="text" id="new-staff-name" placeholder="PERSONEL ADI SOYADI" style="text-transform: uppercase;">
+                    </div>
+                    <button id="save-staff-btn" class="primary-btn">Kaydet</button>
+                </div>
+
+                <!-- View Logs Section -->
+                <div id="view-logs-section" class="hidden admin-section">
+                    <h4>Son 100 Kayıt</h4>
+                    <div class="table-container">
+                        <table class="glass-table">
+                            <thead>
+                                <tr>
+                                    <th>İsim</th>
+                                    <th>Konum</th>
+                                    <th>Tarih</th>
+                                    <th>Saat</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logs-table-body">
+                                <tr><td colspan="4" style="text-align:center; padding: 15px;">Yükleniyor...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="change-pass-section" class="hidden admin-section">
+                    <div class="input-group">
+                        <label>Yeni Kullanıcı Adı</label>
+                        <input type="text" id="new-user">
+                    </div>
+                    <div class="input-group">
+                        <label>Yeni Şifre</label>
+                        <input type="password" id="new-pass">
+                    </div>
+                    <button id="save-creds-btn" class="primary-btn">Kaydet</button>
+                </div>
+                <button id="logout-btn" class="secondary-btn" style="margin-top:20px;">Çıkış Yap</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>

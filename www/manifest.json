@@ -1,0 +1,19 @@
+{
+  "name": "Personel Takip",
+  "short_name": "Personel Takip",
+  "description": "QR kod ile personel giriş-çıkış ve konum takip uygulaması",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+	"appId": "com.personeltakip.app",
+	"appName": "Personel Takip",
+	"webDir": "www",
+	"packageClassList": [
+		"CAPCameraPlugin"
+	]
+}
